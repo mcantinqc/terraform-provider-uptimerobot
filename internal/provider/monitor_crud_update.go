@@ -191,6 +191,12 @@ func buildUpdateRequest(
 		return nil, ""
 	}
 
+	// alert contacts
+	setAlertContactsOnUpdate(ctx, plan, req, resp)
+	if resp.Diagnostics.HasError() {
+		return nil, ""
+	}
+
 	req.SSLExpirationReminder = plan.SSLExpirationReminder.ValueBool()
 	req.DomainExpirationReminder = plan.DomainExpirationReminder.ValueBool()
 	req.FollowRedirections = plan.FollowRedirections.ValueBool()
@@ -384,6 +390,57 @@ func setTagsOnUpdate(ctx context.Context, plan monitorResourceModel, req *client
 		req.Tags = &empty
 	} else {
 		req.Tags = &tags
+	}
+}
+
+func setAlertContactsOnUpdate(ctx context.Context, plan monitorResourceModel, req *client.UpdateMonitorRequest, resp *resource.UpdateResponse) {
+	if plan.AssignedAlertContacts.IsUnknown() {
+		return // omit and preserve on server
+	}
+	if plan.AssignedAlertContacts.IsNull() {
+		return // preserve remote
+	}
+	var acs []alertContactTF
+	resp.Diagnostics.Append(plan.AssignedAlertContacts.ElementsAs(ctx, &acs, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	req.AssignedAlertContacts = make([]client.AlertContactRequest, 0, len(acs))
+	for i, ac := range acs {
+		item := client.AlertContactRequest{}
+		if ac.AlertContactID.IsNull() || ac.AlertContactID.IsUnknown() {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("assigned_alert_contacts").AtListIndex(i).AtName("alert_contact_id"),
+				"Missing alert_contact_id",
+				"Each element must set alert_contact_id.",
+			)
+			return
+		}
+		item.AlertContactID = ac.AlertContactID.ValueString()
+
+		if ac.Threshold.IsNull() || ac.Threshold.IsUnknown() {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("assigned_alert_contacts"),
+				"Missing threshold",
+				"threshold is required by the API and must be set.",
+			)
+			return
+		}
+		if ac.Recurrence.IsNull() || ac.Recurrence.IsUnknown() {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("assigned_alert_contacts"),
+				"Missing recurrence",
+				"recurrence is required by the API and must be set.",
+			)
+			return
+		}
+		t := ac.Threshold.ValueInt64()
+		rec := ac.Recurrence.ValueInt64()
+		item.Threshold = &t
+		item.Recurrence = &rec
+
+		req.AssignedAlertContacts = append(req.AssignedAlertContacts, item)
 	}
 }
 
